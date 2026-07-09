@@ -1,4 +1,14 @@
 // Service database terpisah menggunakan IndexedDB dengan sinkronisasi ke Server API
+import { 
+  collection, 
+  doc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  getDoc
+} from "firebase/firestore";
+import { db } from "./firebase";
 
 const DB_NAME = "BnFChicBoutiqueDB";
 const DB_VERSION = 1;
@@ -319,196 +329,107 @@ export async function clearTransactions(): Promise<void> {
   });
 }
 
-// === SERVER SYNCHRONIZATION ===
+// === SERVER SYNCHRONIZATION WITH FIREBASE FIRESTORE ===
 
-const KVDB_URL = "https://kvdb.io/BnFChicBoutiqueApp_7dd7a2d5";
-
-// Helper to fetch from KVDB Cloud
-async function fetchFromCloud(key: "products" | "transactions"): Promise<any> {
-  const res = await fetch(`${KVDB_URL}/${key}`);
-  if (res.ok) {
-    return await res.json();
-  }
-  if (res.status === 404) {
-    return null;
-  }
-  throw new Error(`Cloud fetch failed with status ${res.status}`);
-}
-
-// Helper to write to KVDB Cloud
-async function saveToCloud(key: "products" | "transactions", data: any): Promise<boolean> {
-  try {
-    const res = await fetch(`${KVDB_URL}/${key}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data)
-    });
-    return res.ok;
-  } catch (e) {
-    console.error(`Gagal upload ${key} ke cloud:`, e);
-    return false;
-  }
-}
-
-// Fetch dari server & update IndexedDB lokal
+// Fetch dari Firestore & update IndexedDB lokal
 export async function syncFromServer(): Promise<{ products: Product[], transactions: Transaction[] }> {
   let products: Product[] = [];
   let transactions: Transaction[] = [];
-  let useCloudFallback = false;
 
   try {
-    // 1. Coba sync lewat Express server local dulu
-    const prodRes = await fetch("/api/products");
-    if (prodRes.ok) {
-      products = await prodRes.json();
-    } else {
-      useCloudFallback = true;
-    }
-
-    const txRes = await fetch("/api/transactions");
-    if (txRes.ok) {
-      transactions = await txRes.json();
-    } else {
-      useCloudFallback = true;
-    }
-  } catch (error) {
-    console.warn("Express server offline atau tidak merespon, beralih ke KVDB Cloud...");
-    useCloudFallback = true;
-  }
-
-  // Jika Express API offline atau mengembalikan error (seperti di Vercel), gunakan cloud fallback
-  if (useCloudFallback) {
-    try {
-      let cloudProducts = await fetchFromCloud("products");
-      let cloudTransactions = await fetchFromCloud("transactions");
-
-      if (!cloudProducts) {
-        // Jika data di cloud kosong, seed dengan INITIAL_PRODUCTS
-        cloudProducts = INITIAL_PRODUCTS;
-        await saveToCloud("products", INITIAL_PRODUCTS);
+    // 1. Ambil produk dari Firestore
+    const prodCol = collection(db, "products");
+    const prodSnapshot = await getDocs(prodCol);
+    
+    if (prodSnapshot.empty) {
+      console.log("Seeding INITIAL_PRODUCTS ke Firestore...");
+      for (const prod of INITIAL_PRODUCTS) {
+        await setDoc(doc(db, "products", prod.id), prod);
       }
-      if (!cloudTransactions) {
-        cloudTransactions = [];
-        await saveToCloud("transactions", []);
+      products = [...INITIAL_PRODUCTS];
+    } else {
+      prodSnapshot.forEach((docSnap) => {
+        products.push(docSnap.data() as Product);
+      });
+    }
+
+    // 2. Ambil transaksi dari Firestore
+    const txCol = collection(db, "transactions");
+    const txSnapshot = await getDocs(txCol);
+    txSnapshot.forEach((docSnap) => {
+      transactions.push(docSnap.data() as Transaction);
+    });
+
+    // 3. Simpan data terbaru ke IndexedDB lokal agar sinkron & mendukung offline
+    if (products && products.length > 0) {
+      await clearProducts();
+      for (const prod of products) {
+        await saveProduct(prod);
       }
-
-      products = cloudProducts;
-      transactions = cloudTransactions;
-    } catch (cloudErr) {
-      console.error("Gagal sinkronisasi dengan KVDB Cloud, menggunakan data IndexedDB lokal:", cloudErr);
-      products = await getAllProducts();
-      transactions = await getAllTransactions();
-      return { products, transactions };
     }
-  }
 
-  // Simpan data terbaru ke IndexedDB lokal agar sinkron
-  if (products && products.length > 0) {
-    await clearProducts();
-    for (const prod of products) {
-      await saveProduct(prod);
+    await clearTransactions();
+    if (transactions && transactions.length > 0) {
+      for (const tx of transactions) {
+        await saveTransaction(tx);
+      }
     }
-  }
 
-  await clearTransactions();
-  if (transactions && transactions.length > 0) {
-    for (const tx of transactions) {
-      await saveTransaction(tx);
-    }
+    return { products, transactions };
+  } catch (err) {
+    console.error("Gagal sinkronisasi data dari Firestore, menggunakan data IndexedDB lokal:", err);
+    const localProducts = await getAllProducts();
+    const localTransactions = await getAllTransactions();
+    return { products: localProducts, transactions: localTransactions };
   }
-
-  return { products, transactions };
 }
 
-// Kirim produk baru/edit ke server atau cloud
+// Kirim produk baru/edit ke Firestore
 export async function addOrUpdateProductOnServer(product: Product, isNew: boolean): Promise<boolean> {
-  // Selalu simpan ke IndexedDB lokal dulu agar langsung terasa perubahannya
+  // Simpan ke IndexedDB lokal dulu
   await saveProduct(product);
 
   try {
-    const method = isNew ? "POST" : "PUT";
-    const url = isNew ? "/api/products" : `/api/products/${product.id}`;
-    
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(product)
-    });
-
-    if (res.ok) {
-      const savedProd = await res.json();
-      await saveProduct(savedProd);
-      return true;
-    }
-  } catch (e) {
-    console.warn("Server API offline/gagal, menulis langsung ke KVDB Cloud...");
-  }
-
-  // Fallback Vercel: sinkronisasikan seluruh list produk lokal ke Cloud
-  try {
-    const allProducts = await getAllProducts();
-    const success = await saveToCloud("products", allProducts);
-    return success;
+    const docRef = doc(db, "products", product.id);
+    await setDoc(docRef, product);
+    return true;
   } catch (err) {
-    console.error("Gagal sinkronisasi produk ke KVDB Cloud:", err);
+    console.error("Gagal menyimpan produk ke Firestore:", err);
     return false;
   }
 }
 
-// Hapus produk dari server atau cloud
+// Hapus produk dari Firestore
 export async function deleteProductOnServer(id: string): Promise<boolean> {
+  // Hapus dari IndexedDB lokal dulu
   await deleteProduct(id);
 
   try {
-    const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      return true;
-    }
-  } catch (e) {
-    console.warn("Server API offline/gagal, menghapus lewat KVDB Cloud...");
-  }
-
-  try {
-    const allProducts = await getAllProducts();
-    const success = await saveToCloud("products", allProducts);
-    return success;
+    const docRef = doc(db, "products", id);
+    await deleteDoc(docRef);
+    return true;
   } catch (err) {
-    console.error("Gagal sinkronisasi hapus produk ke KVDB Cloud:", err);
+    console.error("Gagal menghapus produk dari Firestore:", err);
     return false;
   }
 }
 
-// Kirim transaksi ke server atau cloud (Checkout)
+// Kirim transaksi ke Firestore (Checkout)
 export async function createTransactionOnServer(trx: Transaction): Promise<boolean> {
+  // Simpan ke IndexedDB lokal dulu
   await saveTransaction(trx);
 
   try {
-    const res = await fetch("/api/transactions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(trx)
-    });
-
-    if (res.ok) {
-      const savedTrx = await res.json();
-      await saveTransaction(savedTrx);
-      return true;
-    }
-  } catch (e) {
-    console.warn("Server API offline/gagal, menyimpan transaksi ke KVDB Cloud...");
-  }
-
-  try {
-    const allTransactions = await getAllTransactions();
-    const success = await saveToCloud("transactions", allTransactions);
-    return success;
+    const docRef = doc(db, "transactions", trx.id);
+    await setDoc(docRef, trx);
+    return true;
   } catch (err) {
-    console.error("Gagal sinkronisasi transaksi ke KVDB Cloud:", err);
+    console.error("Gagal menyimpan transaksi ke Firestore:", err);
     return false;
   }
 }
 
-// Konfirmasi pembayaran di server atau cloud
+// Konfirmasi pembayaran di Firestore & Potong Stok Produk
 export async function confirmTransactionPaymentOnServer(id: string): Promise<boolean> {
   const localTxs = await getAllTransactions();
   const tx = localTxs.find(t => t.id === id);
@@ -518,50 +439,46 @@ export async function confirmTransactionPaymentOnServer(id: string): Promise<boo
   }
 
   try {
-    const res = await fetch(`/api/transactions/${id}/confirm`, {
-      method: "PUT"
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success) {
-        await saveTransaction(data.transaction);
-        return true;
+    const txRef = doc(db, "transactions", id);
+    const txSnap = await getDoc(txRef);
+    if (txSnap.exists()) {
+      const transactionData = txSnap.data() as Transaction;
+      if (transactionData.status !== "Pembayaran Sukses") {
+        // Update status di Firestore
+        await updateDoc(txRef, { status: "Pembayaran Sukses" });
+        
+        // Kurangi stok produk di Firestore untuk item yang dibeli
+        if (transactionData.itemDibeli && transactionData.itemDibeli.length > 0) {
+          for (const item of transactionData.itemDibeli) {
+            const prodRef = doc(db, "products", item.id);
+            const prodSnap = await getDoc(prodRef);
+            if (prodSnap.exists()) {
+              const prodData = prodSnap.data() as Product;
+              const newStok = Math.max(0, (prodData.stok || 0) - (item.quantity || 0));
+              await updateDoc(prodRef, { stok: newStok });
+            }
+          }
+        }
       }
     }
-  } catch (e) {
-    console.warn("Server API offline/gagal, konfirmasi transaksi ke KVDB Cloud...");
-  }
-
-  try {
-    const allTransactions = await getAllTransactions();
-    const success = await saveToCloud("transactions", allTransactions);
-    return success;
+    return true;
   } catch (err) {
-    console.error("Gagal sinkronisasi konfirmasi pembayaran ke KVDB Cloud:", err);
+    console.error("Gagal konfirmasi pembayaran di Firestore:", err);
     return false;
   }
 }
 
-// Hapus transaksi dari server atau cloud
+// Hapus transaksi dari Firestore
 export async function deleteTransactionOnServer(id: string): Promise<boolean> {
+  // Hapus dari IndexedDB lokal dulu
   await deleteTransaction(id);
 
   try {
-    const res = await fetch(`/api/transactions/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      return true;
-    }
-  } catch (e) {
-    console.warn("Server API offline/gagal, menghapus transaksi lewat KVDB Cloud...");
-  }
-
-  try {
-    const allTransactions = await getAllTransactions();
-    const success = await saveToCloud("transactions", allTransactions);
-    return success;
+    const docRef = doc(db, "transactions", id);
+    await deleteDoc(docRef);
+    return true;
   } catch (err) {
-    console.error("Gagal sinkronisasi hapus transaksi ke KVDB Cloud:", err);
+    console.error("Gagal menghapus transaksi dari Firestore:", err);
     return false;
   }
 }

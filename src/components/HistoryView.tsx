@@ -1,13 +1,18 @@
 import React, { useState } from "react";
-import { Search, ClipboardList, Eye, Trash2, Printer, ExternalLink, Sparkles, Filter, AlertCircle } from "lucide-react";
+import { Search, ClipboardList, Eye, Trash2, Printer, ExternalLink, Sparkles, Filter, AlertCircle, CheckCircle } from "lucide-react";
 import { Transaction } from "../types";
 
 interface HistoryViewProps {
   transactions: Transaction[];
   onDeleteTransactionClick?: (id: string) => Promise<void>;
+  onConfirmTransactionClick?: (id: string) => Promise<void>;
 }
 
-export default function HistoryView({ transactions, onDeleteTransactionClick }: HistoryViewProps) {
+export default function HistoryView({ 
+  transactions, 
+  onDeleteTransactionClick,
+  onConfirmTransactionClick 
+}: HistoryViewProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("Semua");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
@@ -180,6 +185,20 @@ export default function HistoryView({ transactions, onDeleteTransactionClick }: 
                           <ExternalLink className="w-4 h-4" />
                         </a>
 
+                        {onConfirmTransactionClick && tx.status === "Menunggu Pembayaran" && (
+                          <button
+                            onClick={async () => {
+                              if (confirm(`Konfirmasi pembayaran untuk transaksi #${tx.id}?`)) {
+                                await onConfirmTransactionClick(tx.id);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 hover:text-green-700 transition-colors cursor-pointer font-bold animate-bounce"
+                            title="Konfirmasi Pembayaran (Lunas)"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                        )}
+
                         {onDeleteTransactionClick && (
                           <button
                             onClick={() => {
@@ -290,6 +309,20 @@ export default function HistoryView({ transactions, onDeleteTransactionClick }: 
 
             {/* Action buttons */}
             <div className="flex gap-2 pt-2 border-t border-rose-50">
+              {onConfirmTransactionClick && selectedTx.status === "Menunggu Pembayaran" && (
+                <button
+                  onClick={async () => {
+                    if (confirm(`Konfirmasi pembayaran untuk transaksi #${selectedTx.id}?`)) {
+                      await onConfirmTransactionClick(selectedTx.id);
+                      setSelectedTx({ ...selectedTx, status: "Pembayaran Sukses" });
+                    }
+                  }}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Konfirmasi Lunas
+                </button>
+              )}
               <a
                 href={`/nota/${selectedTx.id}`}
                 target="_blank"

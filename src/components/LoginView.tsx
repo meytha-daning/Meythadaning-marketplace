@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Mail, Lock, User as UserIcon, Sparkles } from "lucide-react";
 import { User } from "../types";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "../firebase";
 
 interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
@@ -21,83 +23,69 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
     try {
       if (isRegister) {
-        // Register flow
-        try {
-          const res = await fetch("/api/users", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, password, nama, role: "buyer" }),
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            onLoginSuccess({
-              email: data.email,
-              nama: data.nama,
-              role: data.role,
-            });
-            return;
-          } else {
-            const data = await res.json().catch(() => ({}));
-            if (data.error) {
-              throw new Error(data.error);
-            }
-          }
-        } catch (serverErr) {
-          console.warn("Gagal register di server, menggunakan pendaftaran lokal:", serverErr);
+        // Register flow via Firestore
+        const userRef = doc(db, "users", email.toLowerCase());
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+          throw new Error("Email sudah terdaftar. Silakan login.");
         }
 
-        // Fallback pendaftaran lokal jika server tidak aktif (Vercel)
-        onLoginSuccess({
+        const userData = {
           email: email.toLowerCase(),
+          password,
           nama: nama || email.split("@")[0],
-          role: "buyer",
+          role: "buyer" as const
+        };
+
+        await setDoc(userRef, userData);
+        onLoginSuccess({
+          email: userData.email,
+          nama: userData.nama,
+          role: userData.role
         });
       } else {
-        // Login flow
-        // Standard admin login override
+        // Login flow via Firestore
+        // Admin override
         if (email.toLowerCase() === "meythadaning05@gmail.com" && (password === "meyta123" || password === "meyta1234")) {
           onLoginSuccess({
             email: "meythadaning05@gmail.com",
             nama: "Meytha Daning",
             role: "admin",
           });
-          setIsLoading(false);
           return;
         }
 
-        // Standard user check via server
-        try {
-          const res = await fetch("/api/users", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, password, nama: email.split("@")[0] }),
-          });
+        const userRef = doc(db, "users", email.toLowerCase());
+        const userSnap = await getDoc(userRef);
 
-          if (res.ok) {
-            const data = await res.json();
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          if (userData.password === password) {
             onLoginSuccess({
-              email: data.email,
-              nama: data.nama,
-              role: data.role,
+              email: userData.email,
+              nama: userData.nama,
+              role: (userData.role === "admin" ? "admin" : "buyer") as "admin" | "buyer"
             });
             return;
           } else {
-            const data = await res.json().catch(() => ({}));
-            if (data.error) {
-              throw new Error(data.error);
-            }
+            throw new Error("Password salah. Silakan coba lagi.");
           }
-        } catch (serverErr) {
-          console.warn("Gagal login di server, masuk menggunakan mode lokal (Vercel):", serverErr);
+        } else {
+          // Jika user tidak ditemukan, lakukan auto-register agar proses checkout lancar bagi pembeli baru
+          const userData = {
+            email: email.toLowerCase(),
+            password,
+            nama: email.split("@")[0],
+            role: "buyer" as const
+          };
+          await setDoc(userRef, userData);
+          onLoginSuccess({
+            email: userData.email,
+            nama: userData.nama,
+            role: userData.role
+          });
         }
-
-        // Fallback login lokal jika server tidak aktif (Vercel)
-        onLoginSuccess({
-          email: email.toLowerCase(),
-          nama: email.split("@")[0],
-          role: "buyer",
-        });
       }
     } catch (err: any) {
       setError(err.message || "Terjadi kesalahan sistem.");

@@ -9,7 +9,8 @@ import {
   createTransactionOnServer,
   getAllProducts,
   getAllTransactions,
-  deleteTransactionOnServer
+  deleteTransactionOnServer,
+  confirmTransactionPaymentOnServer
 } from "./dbService";
 
 // Import modular views
@@ -149,6 +150,19 @@ export default function App() {
     }
   };
 
+  const handleConfirmTransaction = async (id: string) => {
+    try {
+      const success = await confirmTransactionPaymentOnServer(id);
+      if (success) {
+        await syncData();
+      } else {
+        alert("Gagal konfirmasi pembayaran transaksi.");
+      }
+    } catch (e) {
+      console.error("Gagal konfirmasi pembayaran:", e);
+    }
+  };
+
   // Render Public Invoice Route without needing login
   if (isInvoiceRoute && invoiceId) {
     return (
@@ -209,6 +223,7 @@ export default function App() {
           <HistoryView
             transactions={filteredTxs}
             onDeleteTransactionClick={user.role === "admin" ? handleDeleteTransaction : undefined}
+            onConfirmTransactionClick={user.role === "admin" ? handleConfirmTransaction : undefined}
           />
         );
       default:
