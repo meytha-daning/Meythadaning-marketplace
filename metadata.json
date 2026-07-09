@@ -1,0 +1,6 @@
+{
+  "name": "B&F Chic Boutique App",
+  "description": "Marketplace and Point of Sale (PoS) system for B&F Chic Boutique featuring elegant clothing, beauty products, shopping cart, WhatsApp checkout, online invoices, and real-time admin management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
