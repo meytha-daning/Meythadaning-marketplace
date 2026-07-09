@@ -8,7 +8,8 @@ import {
   deleteProductOnServer, 
   createTransactionOnServer,
   getAllProducts,
-  getAllTransactions
+  getAllTransactions,
+  deleteTransactionOnServer
 } from "./dbService";
 
 // Import modular views
@@ -77,14 +78,9 @@ export default function App() {
 
   const syncDataSilent = async () => {
     try {
-      const prodRes = await fetch("/api/products");
-      const txRes = await fetch("/api/transactions");
-      if (prodRes.ok && txRes.ok) {
-        const prodData = await prodRes.json();
-        const txData = await txRes.json();
-        setProducts(prodData);
-        setTransactions(txData);
-      }
+      const data = await syncFromServer();
+      setProducts(data.products);
+      setTransactions(data.transactions);
     } catch (e) {
       console.warn("Silent sync failed, maintaining offline state.");
     }
@@ -144,10 +140,12 @@ export default function App() {
 
   const handleDeleteTransaction = async (id: string) => {
     try {
-      const res = await fetch(`/api/transactions/${id}`, { method: "DELETE" });
-      await syncData();
+      const success = await deleteTransactionOnServer(id);
+      if (success) {
+        await syncData();
+      }
     } catch (e) {
-      console.error(e);
+      console.error("Gagal menghapus transaksi:", e);
     }
   };
 
