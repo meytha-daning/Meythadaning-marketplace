@@ -25,10 +25,11 @@ import KasirView from "./components/KasirView";
 import HistoryView from "./components/HistoryView";
 import ModalProduct from "./components/ModalProduct";
 import InvoiceDetail from "./components/InvoiceDetail";
+import BerandaView from "./components/BerandaView";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState("catalog");
+  const [activeTab, setActiveTab] = useState("beranda");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   
@@ -53,8 +54,8 @@ export default function App() {
       try {
         const u = JSON.parse(savedUser);
         setUser(u);
-        // Default admin to dashboard, buyers to catalog
-        setActiveTab(u.role === "admin" ? "dashboard" : "catalog");
+        // Default admin to dashboard, buyers to beranda
+        setActiveTab(u.role === "admin" ? "dashboard" : "beranda");
       } catch (e) {
         console.error("Gagal mengurai sesi user.", e);
       }
@@ -85,13 +86,13 @@ export default function App() {
   const handleLoginSuccess = (loggedInUser: User) => {
     setUser(loggedInUser);
     localStorage.setItem("bnf_user_session", JSON.stringify(loggedInUser));
-    setActiveTab(loggedInUser.role === "admin" ? "dashboard" : "catalog");
+    setActiveTab(loggedInUser.role === "admin" ? "dashboard" : "beranda");
   };
 
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem("bnf_user_session");
-    setActiveTab("catalog");
+    setActiveTab("beranda");
   };
 
   // Product CRUD Handlers
@@ -180,6 +181,13 @@ export default function App() {
   // Active View Router
   const renderActiveView = () => {
     switch (activeTab) {
+      case "beranda":
+        return (
+          <BerandaView
+            onExploreCatalog={() => setActiveTab("catalog")}
+            buyerName={user?.nama || "Pelanggan"}
+          />
+        );
       case "dashboard":
         return (
           <DashboardView
@@ -203,8 +211,9 @@ export default function App() {
         return (
           <KasirView
             products={products}
-            user={user}
+            user={user!}
             onCheckoutComplete={handleCheckoutComplete}
+            onBackToBeranda={() => setActiveTab("beranda")}
           />
         );
       case "transactions":

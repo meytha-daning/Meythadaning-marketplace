@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { X, Sparkles, AlertCircle } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { X, Sparkles, AlertCircle, UploadCloud } from "lucide-react";
 import { Product } from "../types";
 
 interface ModalProductProps {
@@ -31,6 +31,55 @@ export default function ModalProduct({ product, isOpen, onClose, onSave }: Modal
   const [ukuran, setUkuran] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processImageFile = (file: File) => {
+    setError("");
+    if (!file.type.startsWith("image/")) {
+      setError("File harus berupa gambar (PNG, JPG, JPEG, dll).");
+      return;
+    }
+    // Limit to 2MB to ensure good performance & Firestore payload compatibility
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Ukuran gambar terlalu besar. Maksimal 2MB agar penyimpanan cloud optimal.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setUrlGambar(reader.result as string);
+    };
+    reader.onerror = () => {
+      setError("Gagal membaca file gambar.");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processImageFile(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processImageFile(file);
+    }
+  };
 
   useEffect(() => {
     if (product) {
@@ -63,7 +112,7 @@ export default function ModalProduct({ product, isOpen, onClose, onSave }: Modal
     if (!nama.trim()) return setError("Nama produk wajib diisi.");
     if (harga <= 0) return setError("Harga produk harus lebih besar dari 0.");
     if (stok < 0) return setError("Stok tidak boleh negatif.");
-    if (!urlGambar.trim()) return setError("URL Gambar wajib diisi.");
+    if (!urlGambar.trim()) return setError("Gambar produk wajib diupload atau dipilih.");
 
     setIsSubmitting(true);
     try {
@@ -192,30 +241,54 @@ export default function ModalProduct({ product, isOpen, onClose, onSave }: Modal
             />
           </div>
 
-          {/* Gambar URL */}
+          {/* Gambar Upload Section */}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">URL Gambar Produk</label>
-            <input
-              type="url"
-              required
-              value={urlGambar}
-              onChange={(e) => setUrlGambar(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-400 text-sm"
-              placeholder="https://images.unsplash.com/..."
-            />
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+              Gambar Produk
+            </label>
             
-            {/* Quick Suggestions */}
-            <div className="mt-1.5">
-              <span className="text-[10px] text-slate-500 block mb-1">Gunakan URL contoh cepat jika tidak ada gambar:</span>
+            {/* Drag & Drop Area */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 ${
+                isDragging
+                  ? "border-rose-500 bg-rose-50/50"
+                  : urlGambar
+                  ? "border-rose-200 bg-rose-50/10 hover:border-rose-400"
+                  : "border-slate-300 hover:border-rose-400 hover:bg-rose-50/20"
+              }`}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/*"
+                className="hidden"
+              />
+              
+              <UploadCloud className={`w-8 h-8 ${isDragging || urlGambar ? "text-rose-500" : "text-slate-400"} animate-bounce`} style={{ animationDuration: '3s' }} />
+              
+              <div className="text-xs text-slate-600">
+                <span className="font-semibold text-rose-600 hover:underline">Klik untuk upload</span> atau seret gambar ke sini
+              </div>
+              <p className="text-[10px] text-slate-400">PNG, JPG, JPEG up to 2MB</p>
+            </div>
+
+            {/* Quick Suggestions as quick test fallbacks */}
+            <div className="mt-2.5">
+              <span className="text-[10px] text-slate-500 block mb-1 font-medium">Atau pilih dari koleksi gambar default B&F:</span>
               <div className="flex flex-wrap gap-1.5">
                 {IMAGE_SUGGESTIONS.map((img) => (
                   <button
                     key={img.label}
                     type="button"
                     onClick={() => setUrlGambar(img.url)}
-                    className="text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium px-2 py-0.5 rounded-full border border-rose-100"
+                    className="text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium px-2.5 py-1 rounded-full border border-rose-100/65 transition-colors cursor-pointer"
                   >
-                    + {img.label}
+                    ✨ {img.label}
                   </button>
                 ))}
               </div>
@@ -224,20 +297,31 @@ export default function ModalProduct({ product, isOpen, onClose, onSave }: Modal
 
           {/* Image Preview */}
           {urlGambar && (
-            <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-100">
-              <img
-                src={urlGambar}
-                alt="Pratinjau"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=300&auto=format&fit=crop&q=80";
-                }}
-                className="w-16 h-16 object-cover rounded-xl border border-slate-200 shadow-xs"
-              />
-              <div className="text-xs">
-                <span className="text-slate-500 font-medium block">Pratinjau Gambar</span>
-                <span className="text-green-600 font-semibold block">Gambar termuat sukses ✔</span>
+            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-rose-50/30 border border-rose-100/50">
+              <div className="flex items-center gap-3">
+                <img
+                  src={urlGambar}
+                  alt="Pratinjau"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=300&auto=format&fit=crop&q=80";
+                  }}
+                  className="w-16 h-16 object-cover rounded-xl border border-rose-100 shadow-xs"
+                />
+                <div className="text-xs">
+                  <span className="text-slate-700 font-semibold block">Pratinjau Gambar</span>
+                  <span className="text-emerald-600 font-medium block flex items-center gap-1">
+                    <span>Terpilih ✔</span>
+                  </span>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setUrlGambar("")}
+                className="text-[10px] font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded-lg border border-red-100 hover:bg-red-100 transition-colors cursor-pointer"
+              >
+                Hapus Gambar
+              </button>
             </div>
           )}
 

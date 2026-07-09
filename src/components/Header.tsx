@@ -22,7 +22,7 @@ export default function Header({
   onLogout
 }: HeaderProps) {
   const isAdmin = user.role === "admin";
-  const isInCatalog = activeTab === "catalog" || activeTab === "my-history";
+  const isInCatalog = activeTab === "beranda" || activeTab === "catalog" || activeTab === "my-history";
 
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-rose-100 bg-white px-4 shadow-xs sm:px-6">

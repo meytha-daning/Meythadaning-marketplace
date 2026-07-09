@@ -10,6 +10,26 @@ interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
 }
 
+const formatAuthError = (err: any): string => {
+  const errMsg = err?.message || String(err);
+  const errCode = err?.code;
+  
+  if (
+    errCode === "auth/unauthorized-domain" ||
+    errMsg.includes("auth/unauthorized-domain") ||
+    errMsg.includes("unauthorized domain") ||
+    errMsg.includes("authorized domain")
+  ) {
+    return "Login dengan Google diblokir oleh Firebase karena domain web ini belum terdaftar di Authorized Domains pada Firebase Console Anda.\n\n" +
+           "Cara Mengatasinya:\n" +
+           "1. Buka Firebase Console Anda -> Klik \"Authentication\" -> Pilih tab \"Settings\" -> Klik \"Authorized domains\".\n" +
+           "2. Klik tombol \"Add domain\" lalu masukkan domain berikut:\n" +
+           `👉 ${window.location.hostname}\n\n` +
+           "💡 Sebagai alternatif, Anda tetap dapat mendaftar & masuk dengan cepat menggunakan formulir \"Alamat Email\" dan \"Kata Sandi\" di atas!";
+  }
+  return errMsg || "Gagal masuk menggunakan Akun Google.";
+};
+
 export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState("");
@@ -69,7 +89,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
         }
       } catch (err: any) {
         console.error("Error getting redirect result:", err);
-        setError(err.message || "Gagal memproses masuk dari Akun Google.");
+        setError(formatAuthError(err));
       } finally {
         setIsLoading(false);
       }
@@ -257,7 +277,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
       }
     } catch (err: any) {
       console.error("Google login error:", err);
-      setError(err.message || "Gagal masuk menggunakan Akun Google.");
+      setError(formatAuthError(err));
     } finally {
       setIsLoading(false);
     }
@@ -282,7 +302,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
         <div className="bg-white py-8 px-4 shadow-xl rounded-2xl border border-rose-100 sm:px-10">
           <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
-              <div id="login-error" className="bg-red-50 text-red-600 text-sm p-3 rounded-xl border border-red-100">
+              <div id="login-error" className="bg-red-50 text-red-600 text-sm p-3 rounded-xl border border-red-100 whitespace-pre-line leading-relaxed">
                 {error}
               </div>
             )}

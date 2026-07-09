@@ -38,6 +38,7 @@ export default function Sidebar({
         { id: "transactions", label: "Riwayat Transaksi", icon: ClipboardList },
       ]
     : [
+        { id: "beranda", label: "Beranda", icon: Home },
         { id: "catalog", label: "Katalog Belanja", icon: Store },
         { id: "my-history", label: "Riwayat Pembelian", icon: ClipboardList },
       ];

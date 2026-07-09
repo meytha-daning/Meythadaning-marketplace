@@ -6,9 +6,10 @@ interface KasirViewProps {
   products: Product[];
   user: User;
   onCheckoutComplete: (trx: Transaction) => Promise<void>;
+  onBackToBeranda?: () => void;
 }
 
-export default function KasirView({ products, user, onCheckoutComplete }: KasirViewProps) {
+export default function KasirView({ products, user, onCheckoutComplete, onBackToBeranda }: KasirViewProps) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Semua");
   const [cart, setCart] = useState<CartItem[]>([]);
