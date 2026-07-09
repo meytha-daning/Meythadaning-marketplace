@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Product representation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "harga": { "type": "number" },
+        "stok": { "type": "number" },
+        "kategori": { "type": "string" },
+        "urlGambar": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "ukuran": { "type": "string" }
+      },
+      "required": ["id", "nama", "harga", "stok", "kategori", "urlGambar"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Purchase transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tanggal": { "type": "string" },
+        "totalHarga": { "type": "number" },
+        "itemDibeli": { "type": "array" },
+        "status": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "buyerEmail": { "type": "string" },
+        "buyerPhone": { "type": "string" }
+      },
+      "required": ["id", "tanggal", "totalHarga", "itemDibeli", "status", "buyerName"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User account data",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "nama": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "buyer"] }
+      },
+      "required": ["email", "nama", "role"]
+    }
+  },
+  "firestore": {
+    "products/{productId}": {
+      "schema": "Product",
+      "description": "Product catalog data"
+    },
+    "transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transaction details"
+    },
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile database"
+    }
+  }
+}

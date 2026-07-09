@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBBjuFg8pE1jJiCsi1TrNBihwr2carkW2Q",
@@ -13,5 +14,11 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with the custom databaseId provided in config
-export const db = getFirestore(app, "ai-studio-bfchicboutiqueap-7dd7a2d5-60ad-4395-86a1-ce83fb5bc0b1");
+// Initialize Firestore with long-polling to prevent proxy/iframe connection blockages
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, "ai-studio-bfchicboutiqueap-7dd7a2d5-60ad-4395-86a1-ce83fb5bc0b1");
+
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
+

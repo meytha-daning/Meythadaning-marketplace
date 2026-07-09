@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "database": "ai-studio-bfchicboutiqueap-7dd7a2d5-60ad-4395-86a1-ce83fb5bc0b1"
+  }
+}

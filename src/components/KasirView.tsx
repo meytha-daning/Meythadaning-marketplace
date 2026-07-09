@@ -23,6 +23,36 @@ export default function KasirView({ products, user, onCheckoutComplete }: KasirV
   // Success Order states
   const [lastCreatedTrx, setLastCreatedTrx] = useState<Transaction | null>(null);
 
+  // Sync cart items with fresh products list in real-time (price, stock, details)
+  React.useEffect(() => {
+    setCart((prevCart) => {
+      let isChanged = false;
+      const updatedCart = prevCart.map((item) => {
+        const freshProduct = products.find((p) => p.id === item.id);
+        if (freshProduct) {
+          if (
+            item.harga !== freshProduct.harga ||
+            item.nama !== freshProduct.nama ||
+            item.urlGambar !== freshProduct.urlGambar ||
+            item.stok !== freshProduct.stok
+          ) {
+            isChanged = true;
+            // Cap quantity if stock drops below selected quantity
+            const newQty = Math.min(item.quantity, freshProduct.stok);
+            return {
+              ...item,
+              ...freshProduct,
+              quantity: newQty
+            };
+          }
+        }
+        return item;
+      }).filter(item => item.quantity > 0); // Remove items if stock is 0 and qty got capped to 0
+
+      return isChanged ? updatedCart : prevCart;
+    });
+  }, [products]);
+
   // Filter products
   const filteredProducts = products.filter((p) => {
     const matchesSearch = p.nama.toLowerCase().includes(search.toLowerCase()) ||

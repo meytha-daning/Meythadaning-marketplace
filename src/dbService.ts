@@ -6,9 +6,57 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  getDoc
+  getDoc,
+  onSnapshot
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { db, auth } from "./firebase";
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const DB_NAME = "BnFChicBoutiqueDB";
 const DB_VERSION = 1;
@@ -339,12 +387,22 @@ export async function syncFromServer(): Promise<{ products: Product[], transacti
   try {
     // 1. Ambil produk dari Firestore
     const prodCol = collection(db, "products");
-    const prodSnapshot = await getDocs(prodCol);
+    let prodSnapshot;
+    try {
+      prodSnapshot = await getDocs(prodCol);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.GET, "products");
+      throw err;
+    }
     
     if (prodSnapshot.empty) {
       console.log("Seeding INITIAL_PRODUCTS ke Firestore...");
       for (const prod of INITIAL_PRODUCTS) {
-        await setDoc(doc(db, "products", prod.id), prod);
+        try {
+          await setDoc(doc(db, "products", prod.id), prod);
+        } catch (err: any) {
+          handleFirestoreError(err, OperationType.WRITE, `products/${prod.id}`);
+        }
       }
       products = [...INITIAL_PRODUCTS];
     } else {
@@ -355,7 +413,13 @@ export async function syncFromServer(): Promise<{ products: Product[], transacti
 
     // 2. Ambil transaksi dari Firestore
     const txCol = collection(db, "transactions");
-    const txSnapshot = await getDocs(txCol);
+    let txSnapshot;
+    try {
+      txSnapshot = await getDocs(txCol);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.GET, "transactions");
+      throw err;
+    }
     txSnapshot.forEach((docSnap) => {
       transactions.push(docSnap.data() as Transaction);
     });
@@ -395,6 +459,7 @@ export async function addOrUpdateProductOnServer(product: Product, isNew: boolea
     return true;
   } catch (err) {
     console.error("Gagal menyimpan produk ke Firestore:", err);
+    handleFirestoreError(err, OperationType.WRITE, `products/${product.id}`);
     return false;
   }
 }
@@ -410,6 +475,7 @@ export async function deleteProductOnServer(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.error("Gagal menghapus produk dari Firestore:", err);
+    handleFirestoreError(err, OperationType.DELETE, `products/${id}`);
     return false;
   }
 }
@@ -425,6 +491,7 @@ export async function createTransactionOnServer(trx: Transaction): Promise<boole
     return true;
   } catch (err) {
     console.error("Gagal menyimpan transaksi ke Firestore:", err);
+    handleFirestoreError(err, OperationType.WRITE, `transactions/${trx.id}`);
     return false;
   }
 }
@@ -440,22 +507,44 @@ export async function confirmTransactionPaymentOnServer(id: string): Promise<boo
 
   try {
     const txRef = doc(db, "transactions", id);
-    const txSnap = await getDoc(txRef);
-    if (txSnap.exists()) {
+    let txSnap;
+    try {
+      txSnap = await getDoc(txRef);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, `transactions/${id}`);
+      throw err;
+    }
+    if (txSnap && txSnap.exists()) {
       const transactionData = txSnap.data() as Transaction;
       if (transactionData.status !== "Pembayaran Sukses") {
         // Update status di Firestore
-        await updateDoc(txRef, { status: "Pembayaran Sukses" });
+        try {
+          await updateDoc(txRef, { status: "Pembayaran Sukses" });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `transactions/${id}`);
+          throw err;
+        }
         
         // Kurangi stok produk di Firestore untuk item yang dibeli
         if (transactionData.itemDibeli && transactionData.itemDibeli.length > 0) {
           for (const item of transactionData.itemDibeli) {
             const prodRef = doc(db, "products", item.id);
-            const prodSnap = await getDoc(prodRef);
-            if (prodSnap.exists()) {
+            let prodSnap;
+            try {
+              prodSnap = await getDoc(prodRef);
+            } catch (err) {
+              handleFirestoreError(err, OperationType.GET, `products/${item.id}`);
+              throw err;
+            }
+            if (prodSnap && prodSnap.exists()) {
               const prodData = prodSnap.data() as Product;
               const newStok = Math.max(0, (prodData.stok || 0) - (item.quantity || 0));
-              await updateDoc(prodRef, { stok: newStok });
+              try {
+                await updateDoc(prodRef, { stok: newStok });
+              } catch (err) {
+                handleFirestoreError(err, OperationType.UPDATE, `products/${item.id}`);
+                throw err;
+              }
             }
           }
         }
@@ -479,6 +568,74 @@ export async function deleteTransactionOnServer(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.error("Gagal menghapus transaksi dari Firestore:", err);
+    handleFirestoreError(err, OperationType.DELETE, `transactions/${id}`);
     return false;
   }
+}
+
+// === REAL-TIME SYNCHRONIZATION WITH FIRESTORE ===
+
+// Real-time listener untuk produk dari Firestore
+export function listenToProducts(callback: (products: Product[]) => void, onError?: (error: any) => void) {
+  const prodCol = collection(db, "products");
+  return onSnapshot(prodCol, async (snapshot) => {
+    let products: Product[] = [];
+    snapshot.forEach((docSnap) => {
+      products.push(docSnap.data() as Product);
+    });
+
+    // Jika Firestore masih kosong, gunakan data awal lokal sebagai fallback
+    if (snapshot.empty) {
+      products = [...INITIAL_PRODUCTS];
+    }
+
+    // Update data terbaru ke IndexedDB lokal untuk dukungan offline
+    try {
+      await clearProducts();
+      for (const prod of products) {
+        await saveProduct(prod);
+      }
+    } catch (e) {
+      console.warn("Gagal sinkronisasi produk snapshot ke IndexedDB lokal:", e);
+    }
+
+    callback(products);
+  }, (error) => {
+    console.error("Gagal sinkronisasi real-time produk dari Firestore:", error);
+    try {
+      handleFirestoreError(error, OperationType.LIST, "products");
+    } catch (err) {
+      if (onError) onError(err);
+    }
+  });
+}
+
+// Real-time listener untuk transaksi dari Firestore
+export function listenToTransactions(callback: (transactions: Transaction[]) => void, onError?: (error: any) => void) {
+  const txCol = collection(db, "transactions");
+  return onSnapshot(txCol, async (snapshot) => {
+    const transactions: Transaction[] = [];
+    snapshot.forEach((docSnap) => {
+      transactions.push(docSnap.data() as Transaction);
+    });
+
+    // Update data terbaru ke IndexedDB lokal untuk dukungan offline
+    try {
+      await clearTransactions();
+      for (const tx of transactions) {
+        await saveTransaction(tx);
+      }
+    } catch (e) {
+      console.warn("Gagal sinkronisasi transaksi snapshot ke IndexedDB lokal:", e);
+    }
+
+    callback(transactions);
+  }, (error) => {
+    console.error("Gagal sinkronisasi real-time transaksi dari Firestore:", error);
+    try {
+      handleFirestoreError(error, OperationType.LIST, "transactions");
+    } catch (err) {
+      if (onError) onError(err);
+    }
+  });
 }

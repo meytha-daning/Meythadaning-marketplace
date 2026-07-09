@@ -2,7 +2,9 @@ import React, { useState } from "react";
 import { Mail, Lock, User as UserIcon, Sparkles } from "lucide-react";
 import { User } from "../types";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth, googleProvider } from "../firebase";
+import { signInWithPopup, signInWithRedirect, getRedirectResult } from "firebase/auth";
+import { handleFirestoreError, OperationType } from "../dbService";
 
 interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
@@ -16,29 +18,100 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  // Check for Google Sign-In redirect result on mount
+  React.useEffect(() => {
+    const checkRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result && result.user) {
+          setIsLoading(true);
+          const user = result.user;
+          if (user.email) {
+            const emailLower = user.email.toLowerCase();
+            const userRef = doc(db, "users", emailLower);
+            
+            let userSnap;
+            try {
+              userSnap = await getDoc(userRef);
+            } catch (err: any) {
+              handleFirestoreError(err, OperationType.GET, `users/${emailLower}`);
+              throw err;
+            }
+
+            let userData;
+            if (userSnap.exists()) {
+              const existingData = userSnap.data();
+              userData = {
+                email: emailLower,
+                nama: existingData.nama || user.displayName || "Pelanggan B&F",
+                role: (existingData.role === "admin" ? "admin" : "buyer") as "admin" | "buyer"
+              };
+            } else {
+              userData = {
+                email: emailLower,
+                nama: user.displayName || "Pelanggan B&F",
+                role: "buyer" as const
+              };
+              try {
+                await setDoc(userRef, userData);
+              } catch (err: any) {
+                handleFirestoreError(err, OperationType.WRITE, `users/${emailLower}`);
+                throw err;
+              }
+            }
+
+            onLoginSuccess({
+              email: userData.email,
+              nama: userData.nama,
+              role: userData.role
+            });
+          }
+        }
+      } catch (err: any) {
+        console.error("Error getting redirect result:", err);
+        setError(err.message || "Gagal memproses masuk dari Akun Google.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    checkRedirect();
+  }, [onLoginSuccess]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
 
     try {
+      const emailLower = email.toLowerCase();
       if (isRegister) {
         // Register flow via Firestore
-        const userRef = doc(db, "users", email.toLowerCase());
-        const userSnap = await getDoc(userRef);
+        const userRef = doc(db, "users", emailLower);
+        let userSnap;
+        try {
+          userSnap = await getDoc(userRef);
+        } catch (err: any) {
+          handleFirestoreError(err, OperationType.GET, `users/${emailLower}`);
+          throw err;
+        }
         
         if (userSnap.exists()) {
           throw new Error("Email sudah terdaftar. Silakan login.");
         }
 
         const userData = {
-          email: email.toLowerCase(),
+          email: emailLower,
           password,
           nama: nama || email.split("@")[0],
           role: "buyer" as const
         };
 
-        await setDoc(userRef, userData);
+        try {
+          await setDoc(userRef, userData);
+        } catch (err: any) {
+          handleFirestoreError(err, OperationType.WRITE, `users/${emailLower}`);
+          throw err;
+        }
         onLoginSuccess({
           email: userData.email,
           nama: userData.nama,
@@ -47,7 +120,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
       } else {
         // Login flow via Firestore
         // Admin override
-        if (email.toLowerCase() === "meythadaning05@gmail.com" && (password === "meyta123" || password === "meyta1234")) {
+        if (emailLower === "meythadaning05@gmail.com" && (password === "meyta123" || password === "meyta1234")) {
           onLoginSuccess({
             email: "meythadaning05@gmail.com",
             nama: "Meytha Daning",
@@ -56,8 +129,14 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
           return;
         }
 
-        const userRef = doc(db, "users", email.toLowerCase());
-        const userSnap = await getDoc(userRef);
+        const userRef = doc(db, "users", emailLower);
+        let userSnap;
+        try {
+          userSnap = await getDoc(userRef);
+        } catch (err: any) {
+          handleFirestoreError(err, OperationType.GET, `users/${emailLower}`);
+          throw err;
+        }
 
         if (userSnap.exists()) {
           const userData = userSnap.data();
@@ -74,12 +153,17 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
         } else {
           // Jika user tidak ditemukan, lakukan auto-register agar proses checkout lancar bagi pembeli baru
           const userData = {
-            email: email.toLowerCase(),
+            email: emailLower,
             password,
             nama: email.split("@")[0],
             role: "buyer" as const
           };
-          await setDoc(userRef, userData);
+          try {
+            await setDoc(userRef, userData);
+          } catch (err: any) {
+            handleFirestoreError(err, OperationType.WRITE, `users/${emailLower}`);
+            throw err;
+          }
           onLoginSuccess({
             email: userData.email,
             nama: userData.nama,
@@ -101,16 +185,82 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     setError("");
   };
 
-  const handleMockGoogleLogin = () => {
+  const handleGoogleLogin = async () => {
+    setError("");
     setIsLoading(true);
-    setTimeout(() => {
-      onLoginSuccess({
-        email: "cantika.putri@gmail.com",
-        nama: "Cantika Putri",
-        role: "buyer",
-      });
+    try {
+      // Check if user is on mobile or if we are embedded in an iframe
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isIframe = window.self !== window.top;
+
+      if (isMobile && !isIframe) {
+        // Use redirect on mobile for a smoother experience without popup blocking
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        // Try popup on desktop or in iframe
+        try {
+          const result = await signInWithPopup(auth, googleProvider);
+          const user = result.user;
+          if (!user || !user.email) {
+            throw new Error("Gagal mendapatkan email dari Akun Google.");
+          }
+
+          const emailLower = user.email.toLowerCase();
+          const userRef = doc(db, "users", emailLower);
+          
+          let userSnap;
+          try {
+            userSnap = await getDoc(userRef);
+          } catch (err: any) {
+            handleFirestoreError(err, OperationType.GET, `users/${emailLower}`);
+            throw err;
+          }
+
+          let userData;
+          if (userSnap.exists()) {
+            const existingData = userSnap.data();
+            userData = {
+              email: emailLower,
+              nama: existingData.nama || user.displayName || "Pelanggan B&F",
+              role: (existingData.role === "admin" ? "admin" : "buyer") as "admin" | "buyer"
+            };
+          } else {
+            userData = {
+              email: emailLower,
+              nama: user.displayName || "Pelanggan B&F",
+              role: "buyer" as const
+            };
+            try {
+              await setDoc(userRef, userData);
+            } catch (err: any) {
+              handleFirestoreError(err, OperationType.WRITE, `users/${emailLower}`);
+              throw err;
+            }
+          }
+
+          onLoginSuccess({
+            email: userData.email,
+            nama: userData.nama,
+            role: userData.role
+          });
+        } catch (popupErr: any) {
+          console.warn("Popup blocked or failed, trying redirect fallback:", popupErr);
+          // If popup is blocked or fails, fall back to redirect if not in iframe
+          if (!isIframe) {
+            await signInWithRedirect(auth, googleProvider);
+          } else {
+            throw new Error(
+              "Popup masuk Google diblokir oleh browser Anda. Silakan buka aplikasi ini di tab baru (bukan di dalam frame preview) untuk masuk menggunakan Google."
+            );
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("Google login error:", err);
+      setError(err.message || "Gagal masuk menggunakan Akun Google.");
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
   return (
@@ -215,7 +365,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
             <div className="mt-4 grid grid-cols-1 gap-3">
               <button
                 id="google-login-btn"
-                onClick={handleMockGoogleLogin}
+                onClick={handleGoogleLogin}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-slate-300 rounded-xl bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500 cursor-pointer transition-colors"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">

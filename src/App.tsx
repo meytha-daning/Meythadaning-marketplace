@@ -10,7 +10,9 @@ import {
   getAllProducts,
   getAllTransactions,
   deleteTransactionOnServer,
-  confirmTransactionPaymentOnServer
+  confirmTransactionPaymentOnServer,
+  listenToProducts,
+  listenToTransactions
 } from "./dbService";
 
 // Import modular views
@@ -43,7 +45,7 @@ export default function App() {
   const isInvoiceRoute = pathName.startsWith("/nota/");
   const invoiceId = isInvoiceRoute ? pathName.split("/nota/")[1] : null;
 
-  // 1. Initial Load and Session Restore
+  // 1. Initial Load, Session Restore, and Real-Time Active Synchronization
   useEffect(() => {
     // Restore session
     const savedUser = localStorage.getItem("bnf_user_session");
@@ -58,33 +60,26 @@ export default function App() {
       }
     }
 
-    // Initial database sync with server
-    syncData();
-  }, []);
+    // Subscribe to products real-time
+    const unsubscribeProducts = listenToProducts((latestProducts) => {
+      setProducts(latestProducts);
+    });
 
-  // 2. Real-Time Polling for Price, Stock, and Transaction Changes (Every 3.5 seconds)
-  useEffect(() => {
-    const timer = setInterval(() => {
-      syncDataSilent();
-    }, 3500);
+    // Subscribe to transactions real-time
+    const unsubscribeTransactions = listenToTransactions((latestTransactions) => {
+      setTransactions(latestTransactions);
+    });
 
-    return () => clearInterval(timer);
+    return () => {
+      unsubscribeProducts();
+      unsubscribeTransactions();
+    };
   }, []);
 
   const syncData = async () => {
     const data = await syncFromServer();
     setProducts(data.products);
     setTransactions(data.transactions);
-  };
-
-  const syncDataSilent = async () => {
-    try {
-      const data = await syncFromServer();
-      setProducts(data.products);
-      setTransactions(data.transactions);
-    } catch (e) {
-      console.warn("Silent sync failed, maintaining offline state.");
-    }
   };
 
   const handleLoginSuccess = (loggedInUser: User) => {
